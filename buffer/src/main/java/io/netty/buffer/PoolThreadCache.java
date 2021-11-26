@@ -79,17 +79,21 @@ final class PoolThreadCache {
             throw new IllegalArgumentException("freeSweepAllocationThreshold: "
                     + freeSweepAllocationThreshold + " (expected: > 0)");
         }
+        // 8k
         this.freeSweepAllocationThreshold = freeSweepAllocationThreshold;
         this.heapArena = heapArena;
         this.directArena = directArena;
         if (directArena != null) {
             tinySubPageDirectCaches = createSubPageCaches(
+                    // tinyCacheSize=512 numTinySubpagePools=32
                     tinyCacheSize, PoolArena.numTinySubpagePools, SizeClass.Tiny);
             smallSubPageDirectCaches = createSubPageCaches(
+                    // smallCacheSize=256 numSmallSubpagePools=4
                     smallCacheSize, directArena.numSmallSubpagePools, SizeClass.Small);
 
             numShiftsNormalDirect = log2(directArena.pageSize);
             normalDirectCaches = createNormalCaches(
+                    // normalCacheSize=64 maxCachedBufferCapacity=32k
                     normalCacheSize, maxCachedBufferCapacity, directArena);
 
             directArena.numThreadCaches.getAndIncrement();

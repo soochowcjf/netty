@@ -29,6 +29,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
     protected PoolChunk<T> chunk;
     protected long handle;
     protected T memory;
+    // 在这块memory上的偏移量
     protected int offset;
     protected int length;
     int maxLength;

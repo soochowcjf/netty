@@ -134,12 +134,18 @@ final class PoolChunk<T> implements PoolChunkMetric {
     PoolChunk(PoolArena<T> arena, T memory, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
         unpooled = false;
         this.arena = arena;
+        // 数组对象、byteBuffer
         this.memory = memory;
+        // 8k
         this.pageSize = pageSize;
+        // 13
         this.pageShifts = pageShifts;
+        // 11
         this.maxOrder = maxOrder;
+        // 16M
         this.chunkSize = chunkSize;
         unusable = (byte) (maxOrder + 1);
+        // 24
         log2ChunkSize = log2(chunkSize);
         subpageOverflowMask = ~(pageSize - 1);
         freeBytes = chunkSize;
@@ -202,9 +208,11 @@ final class PoolChunk<T> implements PoolChunkMetric {
     }
 
     long allocate(int normCapacity) {
+        // >=8k 可能是8k、16k、32k ......
         if ((normCapacity & subpageOverflowMask) != 0) { // >= pageSize
             return allocateRun(normCapacity);
         } else {
+            // 分配小于8k的内存
             return allocateSubpage(normCapacity);
         }
     }
@@ -291,6 +299,7 @@ final class PoolChunk<T> implements PoolChunkMetric {
      * @return index in memoryMap
      */
     private long allocateRun(int normCapacity) {
+        // 确定该大小的内存在第几层
         int d = maxOrder - (log2(normCapacity) - pageShifts);
         int id = allocateNode(d);
         if (id < 0) {

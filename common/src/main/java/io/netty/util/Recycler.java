@@ -54,6 +54,7 @@ public abstract class Recycler<T> {
     private static final int INITIAL_CAPACITY;
     private static final int MAX_SHARED_CAPACITY_FACTOR;
     private static final int MAX_DELAYED_QUEUES_PER_THREAD;
+    // 16
     private static final int LINK_CAPACITY;
     private static final int RATIO;
 
@@ -130,14 +131,18 @@ public abstract class Recycler<T> {
 
     protected Recycler(int maxCapacityPerThread, int maxSharedCapacityFactor,
                        int ratio, int maxDelayedQueuesPerThread) {
+        // 7
         ratioMask = safeFindNextPositivePowerOfTwo(ratio) - 1;
         if (maxCapacityPerThread <= 0) {
             this.maxCapacityPerThread = 0;
             this.maxSharedCapacityFactor = 1;
             this.maxDelayedQueuesPerThread = 0;
         } else {
+            // 32768
             this.maxCapacityPerThread = maxCapacityPerThread;
+            // 2
             this.maxSharedCapacityFactor = max(1, maxSharedCapacityFactor);
+            // 12
             this.maxDelayedQueuesPerThread = max(0, maxDelayedQueuesPerThread);
         }
     }
@@ -250,6 +255,7 @@ public abstract class Recycler<T> {
             head = tail = new Link();
             owner = new WeakReference<Thread>(thread);
             synchronized (stack) {
+                // 头插到stack的head属性上去
                 next = stack.head;
                 stack.head = this;
             }
@@ -269,6 +275,13 @@ public abstract class Recycler<T> {
                     ? new WeakOrderQueue(stack, thread) : null;
         }
 
+        /**
+         * 分配一个link的大小，容量为16
+         *
+         * @param availableSharedCapacity
+         * @param space
+         * @return
+         */
         private static boolean reserveSpace(AtomicInteger availableSharedCapacity, int space) {
             assert space >= 0;
             for (;;) {
@@ -276,6 +289,7 @@ public abstract class Recycler<T> {
                 if (available < space) {
                     return false;
                 }
+                // 将可用大小availableSharedCapacity-LINK_CAPACITY（16）
                 if (availableSharedCapacity.compareAndSet(available, available - space)) {
                     return true;
                 }
@@ -424,9 +438,13 @@ public abstract class Recycler<T> {
             this.parent = parent;
             this.thread = thread;
             this.maxCapacity = maxCapacity;
+            // max(32768 / 2 , 16) = 16384
             availableSharedCapacity = new AtomicInteger(max(maxCapacity / maxSharedCapacityFactor, LINK_CAPACITY));
+            // min(256 , 32768) = 256
             elements = new DefaultHandle[min(INITIAL_CAPACITY, maxCapacity)];
+            // 7
             this.ratioMask = ratioMask;
+            // 默认12
             this.maxDelayedQueues = maxDelayedQueues;
         }
 
@@ -454,8 +472,11 @@ public abstract class Recycler<T> {
                 }
                 size = this.size;
             }
+            // 长度-1
             size --;
+            // 取栈头数据
             DefaultHandle ret = elements[size];
+            // 将该位置设置为null
             elements[size] = null;
             if (ret.lastRecycledId != ret.recycleId) {
                 throw new IllegalStateException("recycled multiple times");
@@ -548,11 +569,14 @@ public abstract class Recycler<T> {
                 // Hit the maximum capacity or should drop - drop the possibly youngest object.
                 return;
             }
+            // 进行数组扩容
             if (size == elements.length) {
                 elements = Arrays.copyOf(elements, min(size << 1, maxCapacity));
             }
 
+            // 入栈
             elements[size] = item;
+            // 长度+1
             this.size = size + 1;
         }
 
@@ -561,6 +585,7 @@ public abstract class Recycler<T> {
             // so we null it out; to ensure there are no races with restoring it later
             // we impose a memory ordering here (no-op on x86)
             Map<Stack<?>, WeakOrderQueue> delayedRecycled = DELAYED_RECYCLED.get();
+            // 根据当前线程绑定的stack从map中获取WeakOrderQueue
             WeakOrderQueue queue = delayedRecycled.get(this);
             if (queue == null) {
                 if (delayedRecycled.size() >= maxDelayedQueues) {
@@ -568,6 +593,8 @@ public abstract class Recycler<T> {
                     delayedRecycled.put(this, WeakOrderQueue.DUMMY);
                     return;
                 }
+
+                // 判断剩下的availableSharedCapacity是否可以分配一个WeakOrderQueue，一个WeakOrderQueue可以存16个对象
                 // Check if we already reached the maximum number of delayed queues and if we can allocate at all.
                 if ((queue = WeakOrderQueue.allocate(this, thread)) == null) {
                     // drop object
@@ -579,11 +606,16 @@ public abstract class Recycler<T> {
                 return;
             }
 
+            // 将该item加入到该queue中去
             queue.add(item);
         }
 
         boolean dropHandle(DefaultHandle<?> handle) {
             if (!handle.hasBeenRecycled) {
+                // 这句话的意思呢，其实是将 handleRecycleCount&7
+                // 0&7=0 1&7=1 2&7=2 3&7=3 ... 7&7=7
+                // 8&7=0 9&7=1 10&7=2 11&7=3 ... 15&7=7
+                // 意思呢，就是说没8个对象才会进行一次回收
                 if ((++handleRecycleCount & ratioMask) != 0) {
                     // Drop the object.
                     return true;

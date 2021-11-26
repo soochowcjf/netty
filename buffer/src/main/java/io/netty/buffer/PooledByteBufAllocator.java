@@ -34,12 +34,15 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
     private static final int DEFAULT_NUM_HEAP_ARENA;
     private static final int DEFAULT_NUM_DIRECT_ARENA;
 
+    // 8k
     private static final int DEFAULT_PAGE_SIZE;
     private static final int DEFAULT_MAX_ORDER; // 8192 << 11 = 16 MiB per chunk
     private static final int DEFAULT_TINY_CACHE_SIZE;
     private static final int DEFAULT_SMALL_CACHE_SIZE;
     private static final int DEFAULT_NORMAL_CACHE_SIZE;
+    // 32k
     private static final int DEFAULT_MAX_CACHED_BUFFER_CAPACITY;
+    // 8k
     private static final int DEFAULT_CACHE_TRIM_INTERVAL;
 
     private static final int MIN_PAGE_SIZE = 4096;
@@ -70,11 +73,16 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         // Assuming each arena has 3 chunks, the pool should not consume more than 50% of max memory.
         final Runtime runtime = Runtime.getRuntime();
 
+        // 默认两倍cpu核心线程数的Arena,与io线程数一致，这样可以避免每个线程都可以分到一块Arena，从而避免多线程竞争
+        // 如果是4核，那么就是8
+
         // Use 2 * cores by default to reduce condition as we use 2 * cores for the number of EventLoops
         // in NIO and EPOLL as well. If we choose a smaller number we will run into hotspots as allocation and
         // deallocation needs to be synchronized on the PoolArena.
         // See https://github.com/netty/netty/issues/3888
         final int defaultMinNumArena = runtime.availableProcessors() * 2;
+
+        // 默认chunk的大小是16m (8192<<11 = 16M)
         final int defaultChunkSize = DEFAULT_PAGE_SIZE << DEFAULT_MAX_ORDER;
         DEFAULT_NUM_HEAP_ARENA = Math.max(0,
                 SystemPropertyUtil.getInt(
@@ -158,9 +166,13 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
                                   int tinyCacheSize, int smallCacheSize, int normalCacheSize) {
         super(preferDirect);
         threadCache = new PoolThreadLocalCache();
+        // 512
         this.tinyCacheSize = tinyCacheSize;
+        // 256
         this.smallCacheSize = smallCacheSize;
+        // 64
         this.normalCacheSize = normalCacheSize;
+        // 16M
         final int chunkSize = validateAndCalculateChunkSize(pageSize, maxOrder);
 
         if (nHeapArena < 0) {
@@ -170,6 +182,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
             throw new IllegalArgumentException("nDirectArea: " + nDirectArena + " (expected: >= 0)");
         }
 
+        // 13
         int pageShifts = validateAndCalculatePageShifts(pageSize);
 
         if (nHeapArena > 0) {
@@ -190,8 +203,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
             directArenas = newArenaArray(nDirectArena);
             List<PoolArenaMetric> metrics = new ArrayList<PoolArenaMetric>(directArenas.length);
             for (int i = 0; i < directArenas.length; i ++) {
-                PoolArena.DirectArena arena = new PoolArena.DirectArena(
-                        this, pageSize, maxOrder, pageShifts, chunkSize);
+                PoolArena.DirectArena arena = new PoolArena.DirectArena(this, pageSize, maxOrder, pageShifts, chunkSize);
                 directArenas[i] = arena;
                 metrics.add(arena);
             }
@@ -218,6 +230,11 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
 
         // Logarithm base 2. At this point we know that pageSize is a power of two.
         return Integer.SIZE - 1 - Integer.numberOfLeadingZeros(pageSize);
+    }
+
+    public static void main(String[] args) {
+//        System.out.println(validateAndCalculateChunkSize(8192,11));
+        System.out.println(validateAndCalculatePageShifts(8192));
     }
 
     private static int validateAndCalculateChunkSize(int pageSize, int maxOrder) {
@@ -342,10 +359,14 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator {
         threadCache.remove();
     }
 
+    /**
+     * 绑定某个线程
+     */
     final class PoolThreadLocalCache extends FastThreadLocal<PoolThreadCache> {
 
         @Override
         protected synchronized PoolThreadCache initialValue() {
+            // 最少被线程使用的Arena
             final PoolArena<byte[]> heapArena = leastUsedArena(heapArenas);
             final PoolArena<ByteBuffer> directArena = leastUsedArena(directArenas);
 

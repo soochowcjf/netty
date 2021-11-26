@@ -37,7 +37,13 @@ abstract class PoolArena<T> implements PoolArenaMetric {
         Normal
     }
 
+    // 32
     static final int numTinySubpagePools = 512 >>> 4;
+
+    public static void main(String[] args) {
+//        System.out.println(numTinySubpagePools);
+        System.out.println( ~(8192 - 1));
+    }
 
     final PooledByteBufAllocator parent;
 
@@ -46,6 +52,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
     final int pageShifts;
     final int chunkSize;
     final int subpageOverflowMask;
+    // 4
     final int numSmallSubpagePools;
     private final PoolSubpage<T>[] tinySubpagePools;
     private final PoolSubpage<T>[] smallSubpagePools;
@@ -82,16 +89,22 @@ abstract class PoolArena<T> implements PoolArenaMetric {
 
     protected PoolArena(PooledByteBufAllocator parent, int pageSize, int maxOrder, int pageShifts, int chunkSize) {
         this.parent = parent;
+        // 8k
         this.pageSize = pageSize;
+        // 11
         this.maxOrder = maxOrder;
+        // 13
         this.pageShifts = pageShifts;
+        // 16M
         this.chunkSize = chunkSize;
         subpageOverflowMask = ~(pageSize - 1);
+        // 32个
         tinySubpagePools = newSubpagePoolArray(numTinySubpagePools);
         for (int i = 0; i < tinySubpagePools.length; i ++) {
             tinySubpagePools[i] = newSubpagePoolHead(pageSize);
         }
 
+        // 4个 （13-9）
         numSmallSubpagePools = pageShifts - 9;
         smallSubpagePools = newSubpagePoolArray(numSmallSubpagePools);
         for (int i = 0; i < smallSubpagePools.length; i ++) {
@@ -167,16 +180,21 @@ abstract class PoolArena<T> implements PoolArenaMetric {
     }
 
     private void allocate(PoolThreadCache cache, PooledByteBuf<T> buf, final int reqCapacity) {
+        // 对申请的内存大小进行归一化
         final int normCapacity = normalizeCapacity(reqCapacity);
+        // <8k
         if (isTinyOrSmall(normCapacity)) { // capacity < pageSize
             int tableIdx;
             PoolSubpage<T>[] table;
+            // <512
             boolean tiny = isTiny(normCapacity);
             if (tiny) { // < 512
+                // 先在线程缓存上进行分配
                 if (cache.allocateTiny(this, buf, reqCapacity, normCapacity)) {
                     // was able to allocate out of the cache so move on
                     return;
                 }
+                // 根据需要的大小，计算出在table的index
                 tableIdx = tinyIdx(normCapacity);
                 table = tinySubpagePools;
             } else {
@@ -188,6 +206,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
                 table = smallSubpagePools;
             }
 
+            // 定位到该PoolSubpage
             final PoolSubpage<T> head = table[tableIdx];
 
             /**
