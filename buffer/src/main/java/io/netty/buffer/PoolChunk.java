@@ -145,12 +145,13 @@ final class PoolChunk<T> implements PoolChunkMetric {
         // 16M
         this.chunkSize = chunkSize;
         unusable = (byte) (maxOrder + 1);
-        // 24
+        // 24=log2(16M)
         log2ChunkSize = log2(chunkSize);
         subpageOverflowMask = ~(pageSize - 1);
         freeBytes = chunkSize;
 
         assert maxOrder < 30 : "maxOrder should be < 30, but is: " + maxOrder;
+        // 2048
         maxSubpageAllocs = 1 << maxOrder;
 
         // Generate the memory map.
@@ -300,7 +301,12 @@ final class PoolChunk<T> implements PoolChunkMetric {
      */
     private long allocateRun(int normCapacity) {
         // 确定该大小的内存在第几层
+        // normCapacity=8k  log2(normCapacity)=13   d=11-(13-13)=11
+        // normCapacity=16k  log2(normCapacity)=14   d=11-(14-13)=10
+        // normCapacity=32k  log2(normCapacity)=15   d=11-(15-13)=9
+        // normCapacity=64k  log2(normCapacity)=16   d=11-(16-13)=8
         int d = maxOrder - (log2(normCapacity) - pageShifts);
+        // 这个返回的id，对应的是分配的内存在二叉树中的位置，比如一个新chunk，分配8k内存的话，那么id就是2048，再分配8k，id就是2049
         int id = allocateNode(d);
         if (id < 0) {
             return id;
@@ -321,7 +327,9 @@ final class PoolChunk<T> implements PoolChunkMetric {
         // This is need as we may add it back and so alter the linked-list structure.
         PoolSubpage<T> head = arena.findSubpagePoolHead(normCapacity);
         synchronized (head) {
+            // 因为这里normCapacity都是小于8k，而chunk中一个page的最小就是8k，所以这里就可以直接从叶子节点去分配内存
             int d = maxOrder; // subpages are only be allocated from pages i.e., leaves
+            // 从chunk二叉树中找出一个8k的page
             int id = allocateNode(d);
             if (id < 0) {
                 return id;
@@ -332,14 +340,17 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
             freeBytes -= pageSize;
 
+            // 根据page在树中的位置，定位到他在subpages的index
             int subpageIdx = subpageIdx(id);
             PoolSubpage<T> subpage = subpages[subpageIdx];
             if (subpage == null) {
+                // 新建PoolSubpage
                 subpage = new PoolSubpage<T>(head, this, id, runOffset(id), pageSize, normCapacity);
                 subpages[subpageIdx] = subpage;
             } else {
                 subpage.init(head, normCapacity);
             }
+            // 在subPage上进行内存分配
             return subpage.allocate();
         }
     }
@@ -402,6 +413,9 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
         buf.init(
             this, handle,
+            // 1000000 00000000 00000000 00000000   bitmapIdx
+            // 0111111 11111111 11111111 11111111   0x3FFFFFFF
+            // 可以计算出这个byteBuf使用的是哪片内存，offset是从哪开始的
             runOffset(memoryMapIdx) + (bitmapIdx & 0x3FFFFFFF) * subpage.elemSize, reqCapacity, subpage.elemSize,
             arena.parent.threadCache());
     }
@@ -424,25 +438,45 @@ final class PoolChunk<T> implements PoolChunkMetric {
     }
 
     private int runLength(int id) {
+        // 如果在11层呢，就说明是8k
+        // 如果在10层呢，就说明是16k 以此类推
         // represents the size in #bytes supported by node 'id' in the tree
         return 1 << log2ChunkSize - depth(id);
     }
 
     private int runOffset(int id) {
+        // 比如说id=2048
+        // shift = 2048 ^ 1 << depth(2048) = 2048 ^ 1 << 11 = 0
+        // 如果说id=2049
+        // shift = 2049 ^ 1 << depth(2049) = 2049 ^ 1 << 11 = 1
+        // 如果说id=4095
+        // shift = 4095 ^ 1 << depth(4095) = 4095 ^ 1 << 11 = 2047
+
         // represents the 0-based offset in #bytes from start of the byte-array chunk
         int shift = id ^ 1 << depth(id);
+
+        // 对应上面的，得到下面的结果
+        // 0 * 8k
+        // 1 * 8k
+        // 2047 * 8k
         return shift * runLength(id);
     }
 
     private int subpageIdx(int memoryMapIdx) {
+        // 2048=100000000000
+        // 100000000000 ^ 100000000000 = 0
+        // 100000000001 ^ 100000000000 = 1
+        // 111111111111 ^ 100000000000 = 2047
         return memoryMapIdx ^ maxSubpageAllocs; // remove highest set bit, to get offset
     }
 
     private static int memoryMapIdx(long handle) {
+        // 相当于直接取低32位，也就是该page在二叉树中的index
         return (int) handle;
     }
 
     private static int bitmapIdx(long handle) {
+        // 相当于直接取高32位，也就是标识属于该page中的哪一片内存
         return (int) (handle >>> Integer.SIZE);
     }
 

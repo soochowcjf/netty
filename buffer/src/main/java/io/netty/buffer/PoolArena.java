@@ -150,7 +150,9 @@ abstract class PoolArena<T> implements PoolArenaMetric {
     abstract boolean isDirect();
 
     PooledByteBuf<T> allocate(PoolThreadCache cache, int reqCapacity, int maxCapacity) {
+        // 这一步呢，其实只是从对象池中，获取一个PooledByteBuf对象，此时PooledByteBuf中的memory还没有分配实际的底层内存
         PooledByteBuf<T> buf = newByteBuf(maxCapacity);
+        // 执行内存分配
         allocate(cache, buf, reqCapacity);
         return buf;
     }
@@ -215,6 +217,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
              */
             synchronized (head) {
                 final PoolSubpage<T> s = head.next;
+                // 第一次的时候，s==head的，如果分配了一个PoolSubpage之后，就会将那个poolSubpage挂载到head之后
                 if (s != head) {
                     assert s.doNotDestroy && s.elemSize == normCapacity;
                     long handle = s.allocate();
@@ -252,6 +255,8 @@ abstract class PoolArena<T> implements PoolArenaMetric {
             return;
         }
 
+        // 第一次或者是之前的chunk内存被分配完了，就需要重新创建一个chunk
+        // 这个chunk呢，是实际分配的一块16M的内存地址，底层有数组实现、byteBuffer实现
         // Add a new chunk.
         PoolChunk<T> c = newChunk(pageSize, maxOrder, pageShifts, chunkSize);
         long handle = c.allocate(normCapacity);
